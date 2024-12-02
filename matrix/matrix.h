@@ -73,40 +73,44 @@ private:
 };
 
 template <size_t C, size_t N>
-size_t sliceDimension(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice, size_t index)
+size_t sliceDimension(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice, size_t offset, size_t index)
 {
-  newSlice.extents[C - 1] = 0;
-  return oldSlice.start + index * oldSlice.strides[C - 1];
+  size_t current_dim = C + offset - 1;
+  newSlice.extents[current_dim] = 0;
+  newSlice.size = newSlice.strides[current_dim];
+  return oldSlice.start + index * oldSlice.strides[current_dim];
 }
 
 template <size_t C, size_t N>
-size_t sliceDimension(const MatrixSlice<N>& oldslice, MatrixSlice<N>& newSlice, const Slice& slice)
+size_t sliceDimension(const MatrixSlice<N>& oldslice, MatrixSlice<N>& newSlice, size_t offset, const Slice& slice)
 {
+  size_t current_dim = C + offset - 1;
+
   if (slice.start != sztUNDEF) {
-    newSlice.size = slice.start > 0 ? (slice.start - 1) * newSlice.strides[C - 1] : newSlice.size;
-    newSlice.start += slice.start * newSlice.strides[C - 1];
+    newSlice.size = slice.start > 0 ? (slice.start - 1) * newSlice.strides[current_dim] : newSlice.size;
+    newSlice.start += slice.start * newSlice.strides[current_dim];
   }
 
   if (slice.size != sztUNDEF) {
-    newSlice.size = slice.size < newSlice.extents[C - 1] ? (newSlice.extents[C - 1] - slice.size) * newSlice.strides[C - 1] : newSlice.size;
-    newSlice.extents[C - 1] = std::ceil(static_cast<double>((slice.size - slice.start)) / static_cast<double>(slice.stride));
+    newSlice.size = slice.size < newSlice.extents[current_dim] ? newSlice.size - (newSlice.extents[current_dim] - slice.size) * newSlice.strides[current_dim] : newSlice.size;
+    newSlice.extents[current_dim] = std::ceil(static_cast<double>((slice.size - slice.start)) / static_cast<double>(slice.stride));
   }
 
-  newSlice.strides[C - 1] = newSlice.strides[C - 1] * slice.stride;
+  newSlice.strides[current_dim] = newSlice.strides[current_dim] * slice.stride;
 
   return 0;
 }
 
 template <size_t N, typename T, typename... Args >
-size_t sliceMatrix(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice, const T& arg, const Args&... args)
+size_t sliceMatrix(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice, size_t offset, const T& arg, const Args&... args)
 {
-  size_t m = sliceDimension<sizeof...(Args) + 1>(oldSlice, newSlice, arg);
-  size_t n = sliceMatrix(oldSlice, newSlice, args...);
+  size_t m = sliceDimension<sizeof...(Args) + 1>(oldSlice, newSlice, offset, arg);
+  size_t n = sliceMatrix(oldSlice, newSlice, offset, args...);
   return m + n;
 };
 
 template <size_t N>
-size_t sliceMatrix(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice)
+size_t sliceMatrix(const MatrixSlice<N>& oldSlice, MatrixSlice<N>& newSlice, size_t offset)
 {
   return 0;
 };
@@ -153,8 +157,9 @@ public:
   template <typename... Args >
   MatrixRef<T, N> operator()(const Args&... args) 
   {
+      constexpr size_t offset = N - (sizeof...(Args));
       MatrixSlice<N> slice = _descriptor;
-      slice.start = sliceMatrix(_descriptor, slice, args...);
+      slice.start = sliceMatrix(_descriptor, slice, offset, args...);
       return { slice, _elements.data()};
   }
 
@@ -190,10 +195,10 @@ inline MatrixSlice<N>::MatrixSlice(Dims ...dimensions)
 {
   static_assert(sizeof...(dimensions) == N, "ERROR");
   extents = { static_cast<size_t>(dimensions)... };
-  strides[N-1] = 1;
+  strides[0] = 1;
   
-  for (long int i = N - 2; i >= 0; i--) {
-    strides[i] = strides[i + 1] * *(extents.begin() + i + 1);
+  for (long int i = 1; i < N; i++) {
+    strides[i] = strides[i - 1] * *(extents.begin() + i - 1);
   }
 
   size_t _size = 1;
